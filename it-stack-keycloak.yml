@@ -1,0 +1,57 @@
+# it-stack-keycloak.yml — IT-Stack Module Manifest
+# Module 02: Keycloak OAuth2/OIDC/SAML SSO provider
+
+module:
+  name: keycloak
+  number: "02"
+  repo: it-stack-dev/it-stack-keycloak
+  version: "0.1.0"
+  phase: 1
+  category: identity
+  server: lab-id1
+  description: "Keycloak OAuth2/OIDC/SAML SSO provider"
+
+upstream:
+  name: Keycloak
+  image: quay.io/keycloak/keycloak:24
+  license: Apache-2.0
+
+ports:
+  - 8080 (HTTP)
+   - 8443 (HTTPS)
+
+labs:
+  - id: "02-01"
+    name: Standalone
+    docker_compose: docker/docker-compose.standalone.yml
+    test_script: tests/labs/test-lab-02-01.sh
+  - id: "02-02"
+    name: External Dependencies
+    docker_compose: docker/docker-compose.lan.yml
+    test_script: tests/labs/test-lab-02-02.sh
+  - id: "02-03"
+    name: Advanced Features
+    docker_compose: docker/docker-compose.advanced.yml
+    test_script: tests/labs/test-lab-02-03.sh
+  - id: "02-04"
+    name: SSO Integration
+    docker_compose: docker/docker-compose.sso.yml
+    test_script: tests/labs/test-lab-02-04.sh
+  - id: "02-05"
+    name: Advanced Integration
+    docker_compose: docker/docker-compose.integration.yml
+    test_script: tests/labs/test-lab-02-05.sh
+  - id: "02-06"
+    name: Production Deployment
+    docker_compose: docker/docker-compose.production.yml
+    test_script: tests/labs/test-lab-02-06.sh
+
+resources:
+  cpu_cores: 2
+  ram_gb: 4
+  disk_gb: 20
+
+health_check:
+  endpoint: /health
+  metrics_endpoint: /metrics
+  log_path: /var/log/keycloak/

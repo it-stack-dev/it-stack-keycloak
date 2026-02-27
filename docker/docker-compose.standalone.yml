@@ -1,0 +1,29 @@
+# Lab 01 — Standalone: Complete Keycloak OAuth2/OIDC/SAML SSO provider in isolation
+# No external dependencies required.
+---
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:24
+    container_name: it-stack-keycloak
+    restart: unless-stopped
+    ports:
+      - "8080:$firstPort"
+    environment:
+      - IT_STACK_ENV=lab-01-standalone
+    volumes:
+      - keycloak_data:/var/lib/keycloak
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - it-stack-net
+
+networks:
+  it-stack-net:
+    driver: bridge
+
+volumes:
+  keycloak_data:

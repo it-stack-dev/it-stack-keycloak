@@ -1,0 +1,36 @@
+# Lab 02 — External Dependencies: keycloak with external PostgreSQL and Redis
+---
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:24
+    container_name: it-stack-keycloak
+    restart: unless-stopped
+    ports:
+      - "8080:$firstPort"
+    environment:
+      - IT_STACK_ENV=lab-02-lan
+      - DB_HOST=
+      - DB_PORT=5432
+      - REDIS_HOST=
+    networks:
+      - it-stack-net
+
+  # Lightweight local DB for lab (replace with lab-db1 in real env)
+  postgres:
+    image: postgres:16
+    container_name: it-stack-keycloak-db
+    environment:
+      POSTGRES_DB: keycloak_db
+      POSTGRES_USER: keycloak_user
+      POSTGRES_PASSWORD: keycloak_pass
+    volumes:
+      - keycloak_pg_data:/var/lib/postgresql/data
+    networks:
+      - it-stack-net
+
+networks:
+  it-stack-net:
+    driver: bridge
+
+volumes:
+  keycloak_pg_data:
