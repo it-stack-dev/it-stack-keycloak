@@ -1,36 +1,92 @@
-# Lab 02 — External Dependencies: keycloak with external PostgreSQL and Redis
----
+# Lab 02-02: External Dependencies — Keycloak with External PostgreSQL
+# Purpose: Keycloak backed by a *separate* PostgreSQL container, simulating
+#          the production topology where Keycloak connects to lab-db1.
+#          Proves JDBC config, schema migration, token persistence across restarts.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.lan.yml up -d
+#   Keycloak:   http://localhost:8080  (admin / Lab02Password!)
+#   Keycloak:   http://localhost:8080/realms/it-stack/.well-known/openid-configuration
+#
+# Key difference from Lab 01:
+#   - PostgreSQL is on a SEPARATE network segment from Keycloak
+#   - DB credentials pass through environment (Ansible Vault in production)
+#   - Keycloak restart does NOT lose realm data (persisted in PG volume)
+
 services:
+
+  # ─── POSTGRESQL (external DB tier) ───────────────────────────────────────
+  # In production this is lab-db1. Here it's on a separate network to
+  # simulate the multi-host topology.
+  keycloak-db:
+    image: postgres:16-alpine
+    container_name: it-stack-keycloak-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: Lab02Password!
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    volumes:
+      - keycloak-db-data:/var/lib/postgresql/data
+    networks:
+      - db-net       # DB tier network — keycloak cannot reach this directly
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "keycloak", "-d", "keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ─── DB BRIDGE (simulates network path from app tier to DB tier) ──────────
+  # In a real multi-server setup, Keycloak on lab-id1 reaches PG on lab-db1
+  # via the 10.0.50.0/24 network. Both networks are attached here to bridge them.
+
+  # ─── KEYCLOAK (app tier) ─────────────────────────────────────────────────
   keycloak:
     image: quay.io/keycloak/keycloak:24
-    container_name: it-stack-keycloak
+    container_name: it-stack-keycloak-lan
     restart: unless-stopped
+    command: start-dev
+    environment:
+      # External PostgreSQL connection (not embedded H2)
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: Lab02Password!
+      # Admin credentials
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: Lab02Password!
+      # Features
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      # Hostname (lab)
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_STRICT: "false"
     ports:
-      - "8080:$firstPort"
-    environment:
-      - IT_STACK_ENV=lab-02-lan
-      - DB_HOST=
-      - DB_PORT=5432
-      - REDIS_HOST=
+      - "8080:8080"
     networks:
-      - it-stack-net
-
-  # Lightweight local DB for lab (replace with lab-db1 in real env)
-  postgres:
-    image: postgres:16
-    container_name: it-stack-keycloak-db
-    environment:
-      POSTGRES_DB: keycloak_db
-      POSTGRES_USER: keycloak_user
-      POSTGRES_PASSWORD: keycloak_pass
-    volumes:
-      - keycloak_pg_data:/var/lib/postgresql/data
-    networks:
-      - it-stack-net
-
-networks:
-  it-stack-net:
-    driver: bridge
+      - app-net
+      - db-net     # must reach the DB
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
 
 volumes:
-  keycloak_pg_data:
+  keycloak-db-data:
+    name: it-stack-keycloak-db-data
+
+networks:
+  app-net:
+    name: it-stack-keycloak-app-net
+    driver: bridge
+  db-net:
+    name: it-stack-keycloak-db-net
+    driver: bridge
+    internal: true    # DB tier is not internet-accessible
