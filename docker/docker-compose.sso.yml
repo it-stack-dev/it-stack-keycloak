@@ -1,34 +1,76 @@
-# Lab 04 — SSO Integration: keycloak with Keycloak OIDC authentication
----
 services:
-  keycloak:
-    image: quay.io/keycloak/keycloak:24
-    container_name: it-stack-keycloak
-    restart: unless-stopped
-    ports:
-      - "8080:$firstPort"
-    environment:
-      - IT_STACK_ENV=lab-04-sso
-      - KEYCLOAK_URL=
-      - KEYCLOAK_REALM=
-      - KEYCLOAK_CLIENT_ID=keycloak
-      - KEYCLOAK_CLIENT_SECRET=
-    networks:
-      - it-stack-net
 
-  # Local Keycloak reference instance for SSO lab (replace with lab-id1 in real env)
-  keycloak-sso:
-    image: quay.io/keycloak/keycloak:24
-    container_name: it-stack-keycloak-sso
-    command: start-dev
+  # ── Keycloak DB (internal) ─────────────────────────────────────────
+  keycloak-db:
+    image: postgres:16-alpine
     environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: kcadmin
+      POSTGRES_PASSWORD: Lab04Password!
+    networks:
+      - kc-db-net
+    volumes:
+      - kc-db-sso:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kcadmin -d keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ── Keycloak SSO hub ───────────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    command: start-dev
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: Lab04Password!
+      KC_DB: postgres
+      KC_DB_URL: "jdbc:postgresql://keycloak-db:5432/keycloak"
+      KC_DB_USERNAME: kcadmin
+      KC_DB_PASSWORD: Lab04Password!
+      KC_HTTP_PORT: "8080"
+      KC_HOSTNAME_STRICT: "false"
+      KC_PROXY: edge
+      # Enable all required features for lab
+      KC_FEATURES: token-exchange,admin-fine-grained-authz
     ports:
       - "8080:8080"
     networks:
-      - it-stack-net
+      - kc-app-net
+      - kc-db-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  # ── Test OIDC client app (simulates resource server) ──────────────
+  oidc-test-app:
+    image: traefik/whoami:latest
+    networks:
+      - kc-app-net
+    ports:
+      - "9000:80"
+
+  # ── MailHog for email verification flows ──────────────────────────
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - kc-app-net
 
 networks:
-  it-stack-net:
+  kc-app-net:
     driver: bridge
+  kc-db-net:
+    driver: bridge
+    internal: true
+
+volumes:
+  kc-db-sso:

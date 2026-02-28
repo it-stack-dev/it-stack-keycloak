@@ -182,3 +182,33 @@ jobs:
       - name: Cleanup
         if: always()
         run: docker compose -f docker/docker-compose.advanced.yml down -v
+
+  lab-04-smoke:
+    name: Lab 04 — Full OIDC/SAML Hub (ROPC, refresh, introspection, SAML)
+    runs-on: ubuntu-latest
+    needs: validate
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get install -y netcat-openbsd curl
+
+      - name: Start SSO stack (keycloak + db + oidc-test-app + mailhog)
+        run: docker compose -f docker/docker-compose.sso.yml up -d
+
+      - name: Wait for Keycloak
+        run: timeout 200 bash -c 'until curl -sf http://localhost:8080/health/ready | grep -q UP; do sleep 5; done'
+
+      - name: Run Lab 02-04 test script
+        env:
+          KC_PASS: "Lab04Password!"
+        run: bash tests/labs/test-lab-02-04.sh
+
+      - name: Collect logs on failure
+        if: failure()
+        run: docker compose -f docker/docker-compose.sso.yml logs
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f docker/docker-compose.sso.yml down -v
