@@ -28,7 +28,7 @@ echo ""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 KC_URL=http://localhost:8080
-KC_ADMIN=admin
+KC_ADMIN="admin"
 KC_ADMIN_PASS="Lab01Password!"
 KC_REALM=it-stack-lab
 
