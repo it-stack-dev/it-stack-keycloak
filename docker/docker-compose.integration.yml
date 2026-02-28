@@ -1,26 +1,130 @@
-# Lab 05 — Advanced Integration: keycloak with full IT-Stack ecosystem
----
 services:
-  keycloak:
-    image: quay.io/keycloak/keycloak:24
-    container_name: it-stack-keycloak
-    restart: unless-stopped
-    ports:
-      - "8080:$firstPort"
+
+  # ── Keycloak DB ───────────────────────────────────────────────────
+  keycloak-db:
+    image: postgres:16-alpine
     environment:
-      - IT_STACK_ENV=lab-05-integration
-      - KEYCLOAK_URL=
-      - DB_HOST=
-      - REDIS_HOST=
-      - SMTP_HOST=
-      - GRAYLOG_HOST=
-    extra_hosts:
-      - "lab-id1:10.0.50.11"
-      - "lab-db1:10.0.50.12"
-      - "lab-proxy1:10.0.50.15"
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: kcadmin
+      POSTGRES_PASSWORD: Lab05Password!
     networks:
-      - it-stack-net
+      - kc-db-net
+    volumes:
+      - kc-db-int:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kcadmin"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ── OpenLDAP: simulates directory (FreeIPA-compatible schema) ─────
+  openldap:
+    image: osixia/openldap:1.5.0
+    environment:
+      LDAP_ORGANISATION: "IT-Stack Lab"
+      LDAP_DOMAIN: "lab.local"
+      LDAP_ADMIN_PASSWORD: Lab05Password!
+      LDAP_CONFIG_PASSWORD: Lab05Password!
+      LDAP_READONLY_USER: "true"
+      LDAP_READONLY_USER_USERNAME: "readonly"
+      LDAP_READONLY_USER_PASSWORD: Lab05Password!
+      LDAP_TLS: "false"
+    ports:
+      - "389:389"
+    networks:
+      - kc-int-net
+    volumes:
+      - ldap-data:/var/lib/ldap
+      - ldap-config:/etc/ldap/slapd.d
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://localhost", "-b", "dc=lab,dc=local", "-D", "cn=admin,dc=lab,dc=local", "-w", "Lab05Password!"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ── phpLDAPadmin: LDAP management UI ─────────────────────────────
+  phpldapadmin:
+    image: osixia/phpldapadmin:0.9.0
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+      PHPLDAPADMIN_HTTPS: "false"
+    ports:
+      - "6443:80"
+    depends_on:
+      openldap:
+        condition: service_healthy
+    networks:
+      - kc-int-net
+
+  # ── Keycloak ──────────────────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    command: start-dev
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+      openldap:
+        condition: service_healthy
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: Lab05Password!
+      KC_DB: postgres
+      KC_DB_URL: "jdbc:postgresql://keycloak-db:5432/keycloak"
+      KC_DB_USERNAME: kcadmin
+      KC_DB_PASSWORD: Lab05Password!
+      KC_HTTP_PORT: "8080"
+      KC_HOSTNAME_STRICT: "false"
+      KC_PROXY: edge
+    ports:
+      - "8080:8080"
+    networks:
+      - kc-int-net
+      - kc-db-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  # ── MailHog: email sink for KC verification mails ─────────────────
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - kc-int-net
+
+  # ── App-A: OIDC client app #1 ─────────────────────────────────────
+  app-a:
+    image: traefik/whoami:latest
+    environment:
+      WHOAMI_NAME: "oidc-app-a"
+    ports:
+      - "9001:80"
+    networks:
+      - kc-int-net
+
+  # ── App-B: OIDC client app #2 ─────────────────────────────────────
+  app-b:
+    image: traefik/whoami:latest
+    environment:
+      WHOAMI_NAME: "oidc-app-b"
+    ports:
+      - "9002:80"
+    networks:
+      - kc-int-net
 
 networks:
-  it-stack-net:
+  kc-int-net:
     driver: bridge
+  kc-db-net:
+    driver: bridge
+    internal: true
+
+volumes:
+  kc-db-int:
+  ldap-data:
+  ldap-config:
