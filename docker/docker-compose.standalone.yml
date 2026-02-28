@@ -1,29 +1,40 @@
-# Lab 01 — Standalone: Complete Keycloak OAuth2/OIDC/SAML SSO provider in isolation
-# No external dependencies required.
+# Lab 02-01 — Standalone: Keycloak 24 in complete isolation
+# Purpose : Verify Keycloak SSO — admin login, realm creation, user management, OIDC token
+# Duration: 30–45 minutes  |  Machines: 1
+# Note    : Uses embedded H2 database (dev mode) — no external DB required
+# Usage   : docker compose -f docker/docker-compose.standalone.yml up -d
 ---
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:24
-    container_name: it-stack-keycloak
+    image: quay.io/keycloak/keycloak:24.0.5
+    container_name: it-stack-keycloak-lab01
     restart: unless-stopped
+    # start-dev uses embedded H2 — fine for standalone lab
+    command: start-dev
     ports:
-      - "8080:$firstPort"
+      - "8080:8080"
     environment:
-      - IT_STACK_ENV=lab-01-standalone
-    volumes:
-      - keycloak_data:/var/lib/keycloak
+      # Bootstrap admin credentials (first startup only)
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: Lab01Password!
+      # Dev mode settings
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_LOG_LEVEL: INFO
+      # Health endpoints
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost/health || exit 1"]
-      interval: 30s
+      test: ["CMD-SHELL",
+        "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 15s
       timeout: 10s
-      retries: 5
-      start_period: 60s
+      retries: 20
+      start_period: 90s
     networks:
       - it-stack-net
 
 networks:
   it-stack-net:
     driver: bridge
-
-volumes:
-  keycloak_data:
