@@ -1,53 +1,166 @@
-# Lab 06 — Production: keycloak HA-ready with monitoring and external volumes
+# Lab 06 -- Production: Keycloak HA cluster with load balancing, PostgreSQL, Redis, Traefik
 ---
 services:
-  keycloak:
-    image: quay.io/keycloak/keycloak:24
-    container_name: it-stack-keycloak
+  kc-db:
+    image: postgres:16-alpine
+    container_name: it-stack-kc-db-prod
     restart: always
-    ports:
-      - "8080:$firstPort"
     environment:
-      - IT_STACK_ENV=production
-      - KEYCLOAK_URL=
-      - DB_HOST=
-      - REDIS_HOST=
-      - GRAYLOG_HOST=
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: "Lab06Password!"
     volumes:
-      - keycloak_data:/var/lib/keycloak
-      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - kc-db-prod-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - kc-db-prod-net
     deploy:
-      replicas: 1
       resources:
         limits:
-          cpus: "4.0"
-          memory: G
-        reservations:
           cpus: "1.0"
           memory: 1G
-      restart_policy:
-        condition: any
-        delay: 5s
-    logging:
-      driver: gelf
-      options:
-        gelf-address: "udp://${GRAYLOG_HOST}:12201"
-        tag: "it-stack-keycloak"
+
+  redis:
+    image: redis:7-alpine
+    container_name: it-stack-kc-redis-prod
+    restart: always
+    command: redis-server --requirepass Lab06Password! --appendonly yes --maxmemory 256mb
+    volumes:
+      - kc-redis-prod-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "redis-cli", "-a", "Lab06Password!", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - kc-prod-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
+
+  keycloak-1:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: it-stack-keycloak-1
+    restart: always
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://kc-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: "Lab06Password!"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "Lab06Password!"
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_PROXY_HEADERS: xforwarded
+      KC_CACHE: local
+      KC_HTTP_PORT: 8080
+      KC_NODE_NAME: keycloak-1
+    command: start --optimized
+    depends_on:
+      kc-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health/ready | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
       start_period: 120s
     networks:
-      - it-stack-net
+      - kc-prod-net
+      - kc-db-prod-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.keycloak.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.keycloak.entrypoints=web"
+      - "traefik.http.services.keycloak.loadbalancer.server.port=8080"
+      - "traefik.http.services.keycloak.loadbalancer.healthcheck.path=/health/ready"
+      - "traefik.http.services.keycloak.loadbalancer.healthcheck.interval=15s"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+
+  keycloak-2:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: it-stack-keycloak-2
+    restart: always
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://kc-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: "Lab06Password!"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "Lab06Password!"
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_PROXY_HEADERS: xforwarded
+      KC_CACHE: local
+      KC_HTTP_PORT: 8080
+      KC_NODE_NAME: keycloak-2
+    command: start --optimized
+    depends_on:
+      kc-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health/ready | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    networks:
+      - kc-prod-net
+      - kc-db-prod-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.keycloak.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.keycloak.entrypoints=web"
+      - "traefik.http.services.keycloak.loadbalancer.server.port=8080"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+
+  traefik:
+    image: traefik:v3.3
+    container_name: it-stack-kc-traefik-prod
+    restart: always
+    ports:
+      - "8080:80"
+      - "8081:8081"
+    command:
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --api.dashboard.entrypoint=dashboard
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.dashboard.address=:8081
+      - --log.level=INFO
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - kc-prod-net
+    depends_on:
+      keycloak-1:
+        condition: service_healthy
+      keycloak-2:
+        condition: service_healthy
 
 networks:
-  it-stack-net:
-    external: true
-    name: it-stack-production
+  kc-prod-net:
+    driver: bridge
+  kc-db-prod-net:
+    driver: bridge
+    internal: true
 
 volumes:
-  keycloak_data:
-    external: true
-    name: it-stack-keycloak-data
+  kc-db-prod-data:
+  kc-redis-prod-data:
