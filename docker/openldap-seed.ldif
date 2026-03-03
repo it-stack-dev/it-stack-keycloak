@@ -1,0 +1,97 @@
+# openldap-seed.ldif
+# Seeds FreeIPA-compatible LDAP structure into the OpenLDAP integration test container.
+# Tree mirrors real FreeIPA:
+#   cn=accounts,dc=lab,dc=local
+#   ├── cn=users,cn=accounts,dc=lab,dc=local   (users OU)
+#   │   ├── uid=testadmin
+#   │   ├── uid=testuser1
+#   │   └── uid=testuser2
+#   └── cn=groups,cn=accounts,dc=lab,dc=local  (groups OU)
+#       ├── cn=admins
+#       └── cn=ipausers
+#
+# Used by:  docker/docker-compose.integration.yml  →  ldap-seed service
+# Ansible:  roles/keycloak/tasks/ldap-federation.yml expects cn=users,cn=accounts,dc=…
+
+# ── Top-level accounts container ──────────────────────────────────────────────
+dn: cn=accounts,dc=lab,dc=local
+objectClass: organizationalRole
+objectClass: top
+cn: accounts
+description: FreeIPA-compatible accounts container
+
+# ── Users container ───────────────────────────────────────────────────────────
+dn: cn=users,cn=accounts,dc=lab,dc=local
+objectClass: organizationalRole
+objectClass: top
+cn: users
+description: IPA user accounts
+
+# ── Groups container ──────────────────────────────────────────────────────────
+dn: cn=groups,cn=accounts,dc=lab,dc=local
+objectClass: organizationalRole
+objectClass: top
+cn: groups
+description: IPA groups
+
+# ── Test users ────────────────────────────────────────────────────────────────
+dn: uid=testadmin,cn=users,cn=accounts,dc=lab,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: testadmin
+cn: Test Admin
+sn: Admin
+givenName: Test
+displayName: Test Admin
+mail: testadmin@lab.local
+telephoneNumber: +1-555-000-0001
+title: System Administrator
+userPassword: Lab05Password!
+
+dn: uid=testuser1,cn=users,cn=accounts,dc=lab,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: testuser1
+cn: Test User1
+sn: User1
+givenName: Test
+displayName: Test User1
+mail: testuser1@lab.local
+telephoneNumber: +1-555-000-0002
+title: Engineer
+userPassword: Lab05Password!
+
+dn: uid=testuser2,cn=users,cn=accounts,dc=lab,dc=local
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+objectClass: top
+uid: testuser2
+cn: Test User2
+sn: User2
+givenName: Test
+displayName: Test User2
+mail: testuser2@lab.local
+telephoneNumber: +1-555-000-0003
+title: Analyst
+userPassword: Lab05Password!
+
+# ── Groups ────────────────────────────────────────────────────────────────────
+dn: cn=admins,cn=groups,cn=accounts,dc=lab,dc=local
+objectClass: groupOfNames
+objectClass: top
+cn: admins
+description: Administrators group (maps to Keycloak realm-admin)
+member: uid=testadmin,cn=users,cn=accounts,dc=lab,dc=local
+
+dn: cn=ipausers,cn=groups,cn=accounts,dc=lab,dc=local
+objectClass: groupOfNames
+objectClass: top
+cn: ipausers
+description: Default IPA users group
+member: uid=testuser1,cn=users,cn=accounts,dc=lab,dc=local
+member: uid=testuser2,cn=users,cn=accounts,dc=lab,dc=local

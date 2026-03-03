@@ -57,6 +57,33 @@ services:
     networks:
       - kc-int-net
 
+  # ── LDAP seed: applies FreeIPA-like LDIF after OpenLDAP is ready ──
+  ldap-seed:
+    image: osixia/openldap:1.5.0
+    depends_on:
+      openldap:
+        condition: service_healthy
+    networks:
+      - kc-int-net
+    volumes:
+      - ./openldap-seed.ldif:/seed/openldap-seed.ldif:ro
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        echo "[seed] Checking if already seeded..."
+        if ldapsearch -x -H ldap://openldap:389 \
+             -D "cn=admin,dc=lab,dc=local" -w "Lab05Password!" \
+             -b "cn=accounts,dc=lab,dc=local" -s base dn 2>/dev/null | grep -q 'cn=accounts'; then
+          echo "[seed] Already seeded — skipping."
+        else
+          echo "[seed] Seeding FreeIPA-like structure..."
+          ldapadd -x -H ldap://openldap:389 \
+            -D "cn=admin,dc=lab,dc=local" -w "Lab05Password!" \
+            -f /seed/openldap-seed.ldif && echo "[seed] Done."
+        fi
+    restart: "no"
+
   # ── Keycloak ──────────────────────────────────────────────────────
   keycloak:
     image: quay.io/keycloak/keycloak:24.0
@@ -64,8 +91,8 @@ services:
     depends_on:
       keycloak-db:
         condition: service_healthy
-      openldap:
-        condition: service_healthy
+      ldap-seed:
+        condition: service_completed_successfully
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: Lab05Password!
